@@ -106,7 +106,8 @@ fileprivate extension TextOutline {
                     remainingLength -= stroke.length
                 } else {
                     let partial = stroke.outline(upTo: remainingLength)
-                    return result.isEmpty ? partial : result.union(partial)
+                    result.addPath(partial)
+                    return result
                 }
             }
             return result
@@ -238,7 +239,11 @@ fileprivate extension TextOutline.Geometry {
             for edge in forwardEdges {
                 edge.append(to: &result)
             }
-            result.addLine(to: backwardEdges.last!.end)
+            appendRoundedEndCap(
+                forwardEdge: forwardEdges.last!,
+                backwardEdge: backwardEdges.last!,
+                to: &result
+            )
             for edge in backwardEdges.reversed() {
                 edge.reversed.append(to: &result)
             }
@@ -246,7 +251,41 @@ fileprivate extension TextOutline.Geometry {
                 curve.append(to: &result)
             }
             result.closeSubpath()
-            return result.intersection(outline)
+            return result
+        }
+
+        private func appendRoundedEndCap(
+            forwardEdge: CubicBezierSegment,
+            backwardEdge: CubicBezierSegment,
+            to path: inout Path
+        ) {
+            let forwardEndpoint = forwardEdge.end
+            let backwardEndpoint = backwardEdge.end
+            let capCenter = forwardEndpoint.midpoint(to: backwardEndpoint)
+            let radialOffset = CGPoint(
+                x: forwardEndpoint.x - capCenter.x,
+                y: forwardEndpoint.y - capCenter.y
+            )
+            let tangentOrigin = forwardEdge.control2.midpoint(to: backwardEdge.control2)
+            let direction: CGFloat = -radialOffset.y * (capCenter.x - tangentOrigin.x)
+                + radialOffset.x * (capCenter.y - tangentOrigin.y) >= 0 ? 1 : -1
+            let outwardOffset = CGPoint(x: -radialOffset.y * direction, y: radialOffset.x * direction)
+            let capTip = CGPoint(x: capCenter.x + outwardOffset.x, y: capCenter.y + outwardOffset.y)
+            // Two cubic quarter circles join the edges without a per-frame boolean union.
+            path.addCurve(
+                to: capTip,
+                control1: CGPoint(x: forwardEndpoint.x + outwardOffset.x * .quarterCircleControlPointScale,
+                                  y: forwardEndpoint.y + outwardOffset.y * .quarterCircleControlPointScale),
+                control2: CGPoint(x: capTip.x + radialOffset.x * .quarterCircleControlPointScale,
+                                  y: capTip.y + radialOffset.y * .quarterCircleControlPointScale)
+            )
+            path.addCurve(
+                to: backwardEndpoint,
+                control1: CGPoint(x: capTip.x - radialOffset.x * .quarterCircleControlPointScale,
+                                  y: capTip.y - radialOffset.y * .quarterCircleControlPointScale),
+                control2: CGPoint(x: backwardEndpoint.x + outwardOffset.x * .quarterCircleControlPointScale,
+                                  y: backwardEndpoint.y + outwardOffset.y * .quarterCircleControlPointScale)
+            )
         }
 
         private struct Segment {
@@ -324,6 +363,10 @@ fileprivate extension TextOutline.Geometry {
                 + halves.suffix.approximateLength(depth: depth + 1)
         }
     }
+}
+
+fileprivate extension CGFloat {
+    static let quarterCircleControlPointScale: CGFloat = 0.5522847498307936
 }
 
 fileprivate extension CGPoint {
